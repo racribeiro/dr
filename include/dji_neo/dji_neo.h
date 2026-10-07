@@ -4,7 +4,7 @@
 /*
  * DJI Neo SDK public C API.
  *
- * The SDK owns DJI wire decoding only. Hosts own the UDP socket, BLE
+ * The SDK owns DJI wire encoding, activation and decoding. Hosts own the UDP socket, BLE
  * provisioning, thread/event-loop choice, persistence, Zenoh, KLV and media
  * muxing. All callbacks are made synchronously by dji_neo_poll() or
  * dji_neo_on_datagram(); the SDK never creates a thread.
@@ -19,7 +19,7 @@ extern "C" {
 
 #define DJI_NEO_PEER_HOST "192.168.2.1"
 #define DJI_NEO_PEER_PORT 9003u
-#define DJI_NEO_MAX_DUML 1024u
+#define DJI_NEO_MAX_DUML 1023u /* ten-bit DUML length field */
 
 typedef struct dji_neo dji_neo_t;
 
@@ -41,7 +41,7 @@ typedef enum {
 
 typedef struct {
     int has_link;       /* a Neo session has been accepted */
-    int has_actuation;  /* installed signer has authorised command framing */
+    int has_actuation;  /* connected session AND signer reports ready */
 } dji_neo_capabilities_t;
 
 /* This is deliberately an SDK data contract, not a Zenoh message. Angles are
@@ -85,20 +85,46 @@ typedef struct {
     dji_neo_video_cb on_video;
     dji_neo_state_cb on_state;
     void *callback_user;
+    /* Fresh, independently chosen identifiers for this connection attempt.
+     * Do not reuse either after a reconnect. The SDK currently does not own an
+     * entropy source, so the host must provide them. */
     uint16_t session_id;
     uint16_t body_id;
+    /* Optional 26-byte keepalive seed. Zero selects the body_id fallback.
+     * The SDK updates bytes 18..19 with the last successfully sent type-5 f45.
+     * Other rolling fields are not yet fully reverse engineered. */
+    uint8_t keepalive_body[26];
+    /* Activation on CONNECTED is automatic unless explicitly disabled. */
+    int disable_activation;
 } dji_neo_config_t;
 
-/* Optional signer for type-5 uplink. It may alter the twelve-byte RC subheader
- * in place, including its final rolling-code/flag byte. Return 0 to authorise
- * the command, nonzero to decline it. No signer means has_actuation == 0.
- * This hook is never invoked by receive, telemetry or video data-plane paths. */
-typedef int (*dji_neo_sign_fn)(void *user, uint8_t rc_subheader[12],
-                               const uint8_t *duml, size_t duml_size);
+/* Complete state supplied to the optional type-5 signer. `rc_subheader` is
+ * mutable: the signer writes the rolling-code/flag and any future fields. The
+ * session id, body id, f45 and counter identify this particular uplink. */
+typedef struct {
+    uint16_t session_id;
+    uint16_t body_id;
+    uint16_t field45;
+    uint8_t counter;
+    uint8_t rc_subheader[12];
+    const uint8_t *duml;
+    size_t duml_size;
+} dji_neo_sign_request_t;
+
+/* Return 0 to authorise the command, nonzero to decline it. Signer may modify
+ * subheader bytes 4..11; it must preserve body_id/f45 bytes 0..3. No signer means
+ * has_actuation == 0. This hook is never invoked by receive, telemetry or
+ * video data-plane paths. */
+typedef int (*dji_neo_sign_fn)(void *user, dji_neo_sign_request_t *request);
+/* Explicit session capability: return 1 only when session keys/state are ready.
+ * A no-op or unavailable signer returns 0. Presence of sign() alone never
+ * enables actuation. The host owns key establishment and signer state. */
+typedef int (*dji_neo_signer_ready_fn)(void *user, uint16_t session_id, uint16_t body_id);
 
 typedef struct {
     dji_neo_sign_fn sign;
     void *user;
+    dji_neo_signer_ready_fn ready;
 } dji_neo_signer_t;
 
 dji_neo_t *dji_neo_create(const dji_neo_config_t *config);
@@ -107,13 +133,26 @@ void dji_neo_destroy(dji_neo_t *neo);
 void dji_neo_set_signer(dji_neo_t *neo, const dji_neo_signer_t *signer);
 void dji_neo_get_capabilities(const dji_neo_t *neo, dji_neo_capabilities_t *out);
 dji_neo_link_state_t dji_neo_link_state(const dji_neo_t *neo);
+/* Explicit fresh session after loss/disarm; resets counters, activation and
+ * all arms. Refused while session-armed. Install freshly keyed signer state
+ * before rearming commands. There is no automatic reuse of lost session IDs. */
+dji_neo_result_t dji_neo_reset_session(dji_neo_t *neo, uint16_t session_id,
+                                       uint16_t body_id);
+/* Optional per-session keepalive seed; NULL selects the body_id fallback.
+ * Configure while disarmed, including after reset_session(). */
+dji_neo_result_t dji_neo_set_keepalive_body(dji_neo_t *neo, const uint8_t body[26]);
+/* Explicitly request another finite liveview start burst on a connected link.
+ * Useful if no video arrives. No implicit endless retry/start traffic. */
+dji_neo_result_t dji_neo_restart_liveview(dji_neo_t *neo);
 
-/* Session arm permits connect/keepalive transmission. It is independent of
+/* Session arm permits connect/keepalive and passive activation transmission. It is independent of
  * actuation signing and defaults off. Disarming clears every downstream gate. */
 dji_neo_result_t dji_neo_set_session_armed(dji_neo_t *neo, int armed);
 
 /* Host-driven link pump. Call regularly (about every 5 ms) with a monotonic
- * clock. State callbacks, if any, run synchronously in this function. */
+ * clock. Callbacks run synchronously. The API is single-threaded and callbacks
+ * must not reenter or destroy the client. Backward clock values are rejected.
+ * LINK_LOST stops traffic until the host resets/rearms a fresh session. */
 dji_neo_result_t dji_neo_poll(dji_neo_t *neo, uint64_t monotonic_ms);
 
 /* Feed an incoming complete Wi-Fi/UDP payload. Data-plane decoding works
@@ -127,8 +166,10 @@ dji_neo_result_t dji_neo_set_command_armed(dji_neo_t *neo, int armed);
 dji_neo_result_t dji_neo_confirm_takeover(dji_neo_t *neo, int confirmed);
 dji_neo_result_t dji_neo_set_stick_enabled(dji_neo_t *neo, int enabled);
 
-/* Sends a read-only/light query. It needs a connected, session-armed link but
- * does not require a signer or command/takeover/stick gate. */
+/* Conservative passive allowlist: currently only empty 00/01 heartbeat from
+ * source 02 to destination 0e with command type 40. All other raw frames are
+ * rejected, preventing a command from bypassing actuation gates via this API.
+ * Does not require signing. Use typed APIs as more queries are validated. */
 dji_neo_result_t dji_neo_send_query(dji_neo_t *neo, const uint8_t *duml, size_t size);
 
 /* Sends an actuation command only after every safety gate and signer approval.
@@ -136,6 +177,21 @@ dji_neo_result_t dji_neo_send_query(dji_neo_t *neo, const uint8_t *duml, size_t 
  * the host until each command is validated on owned test hardware. */
 dji_neo_result_t dji_neo_send_actuation(dji_neo_t *neo, const uint8_t *duml,
                                          size_t size);
+
+/* Typed command APIs own DUML sequence numbers and RC wrapper counters.
+ * All gimbal operations require every actuation gate and signer readiness.
+ * start sends the four enable frames; poll sends control keepalive at 1 Hz.
+ * set rate schedules 25 Hz output, returning to zero after 600 ms without a
+ * refresh. No degree/sec or up/down interpretation is asserted. stop sends a
+ * zero-rate command and closes the gimbal control session. */
+dji_neo_result_t dji_neo_gimbal_start(dji_neo_t *neo);
+dji_neo_result_t dji_neo_gimbal_set_rate(dji_neo_t *neo, int rate, uint64_t monotonic_ms);
+dji_neo_result_t dji_neo_gimbal_stop(dji_neo_t *neo);
+/* Deflections -660..660. poll emits signed non-neutral sticks at ~19 Hz and
+ * returns to center after 600 ms without refresh. Passive centered heartbeat
+ * is independent of actuation gates/signing. */
+dji_neo_result_t dji_neo_set_stick(dji_neo_t *neo, int roll, int pitch,
+                                  int throttle, int yaw, uint64_t monotonic_ms);
 
 #ifdef __cplusplus
 }

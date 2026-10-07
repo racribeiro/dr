@@ -1,5 +1,6 @@
 #include "duml.h"
 #include "dji_neo/dji_neo.h"
+#include <string.h>
 
 static uint8_t reflect8(uint8_t value) {
     uint8_t out = 0;
@@ -30,7 +31,35 @@ static uint16_t crc16(const uint8_t *data, size_t size) {
 int dji_neo_duml_valid(const uint8_t *frame, size_t size) {
     if (!frame || size < 13 || size > DJI_NEO_MAX_DUML || frame[0] != 0x55) return 0;
     size_t encoded = (size_t)frame[1] | ((size_t)(frame[2] & 3) << 8);
-    if (encoded != size || crc8(frame, 3) != frame[3]) return 0;
+    if (encoded != size || (frame[2] >> 2) != 1 || crc8(frame, 3) != frame[3]) return 0;
     uint16_t got = (uint16_t)frame[size - 2] | ((uint16_t)frame[size - 1] << 8);
     return crc16(frame, size - 2) == got;
+}
+
+int dji_neo_duml_build(uint8_t *out, size_t cap, uint8_t src, uint8_t dst,
+                       uint16_t seq, uint8_t kind, uint8_t set, uint8_t id,
+                       const uint8_t *payload, size_t payload_size) {
+    if (!out || (payload_size && !payload) || payload_size > DJI_NEO_MAX_DUML - 13)
+        return DJI_NEO_EINVAL;
+    size_t size = 13 + payload_size;
+    if (cap < size) return DJI_NEO_ENOSPACE;
+    out[0] = 0x55;
+    out[1] = (uint8_t)size;
+    out[2] = (uint8_t)(4 | (size >> 8));
+    out[3] = crc8(out, 3);
+    out[4] = src; out[5] = dst;
+    out[6] = (uint8_t)seq; out[7] = (uint8_t)(seq >> 8);
+    out[8] = kind; out[9] = set; out[10] = id;
+    if (payload_size) memcpy(out + 11, payload, payload_size);
+    uint16_t c = crc16(out, size - 2);
+    out[size - 2] = (uint8_t)c; out[size - 1] = (uint8_t)(c >> 8);
+    return (int)size;
+}
+
+dji_neo_result_t dji_neo_duml_reseq(uint8_t *f, size_t n, uint16_t seq) {
+    if (!dji_neo_duml_valid(f, n)) return DJI_NEO_EINVAL;
+    f[6] = (uint8_t)seq; f[7] = (uint8_t)(seq >> 8);
+    uint16_t c = crc16(f, n - 2);
+    f[n - 2] = (uint8_t)c; f[n - 1] = (uint8_t)(c >> 8);
+    return DJI_NEO_OK;
 }

@@ -1,11 +1,26 @@
-# Experiment
+# DJI Neo C SDK
 
-Early C11 SDK scaffold for integrating DJI Neo Wi-Fi/UDP protocol decoding into
-`dji-evasive`. See [the integration boundary](docs/INTEGRATION.md).
+C11 SDK for encoding DJI commands and driving a Neo Wi-Fi/UDP session from
+`dji-evasive` or another host application. The host owns its UDP socket and
+drives `dji_neo_poll()`; the SDK creates no threads.
+
+Implemented: DUML builders/CRCs, type-5 RC wrapping, subscription replay,
+centered-stick heartbeat, finite liveview start bursts, gimbal enable/rate/stop,
+control keepalive, signed stick setpoints, and OSD telemetry decoding.
+
+Actuation requires a host-provided signer that explicitly reports readiness for
+the current session, plus session arm, command arm, takeover confirmation, and
+stick enable. Passive activation runs with no signer. The DJI rolling-code
+algorithm is still unavailable; internal tests use a mock signer and do not
+prove commands are accepted by a drone.
+
+See [integration and command usage](docs/INTEGRATION.md) and the public headers:
+[client API](include/dji_neo/dji_neo.h), [command builders](include/dji_neo/commands.h).
 
 ## Build
 
-Requires CMake 3.20+ and a C11 compiler.
+Requires Make, CMake 3.20+, and a C11 compiler. The optional loopback test uses
+POSIX sockets.
 
 ```sh
 make build  # configure and compile the static library
@@ -15,3 +30,24 @@ make clean  # remove generated build output
 
 `make` is equivalent to `make build`. Use `BUILD_DIR=out make test` to select a
 different build directory.
+
+Tests compare builders byte-for-byte against the sanitized capture, validate
+the complete emitted gimbal datagram, and exercise gates, signer errors, send
+failures, counter wrap, activation cadence, stale inputs, and session loss.
+The real OSD/CRC fixture is also registered in CTest. The UDP loopback test is
+reported as skipped if the environment denies socket creation.
+
+## Integrate
+
+```cmake
+add_subdirectory(path/to/dji-reverse neo-sdk)
+target_link_libraries(your_app PRIVATE dji_neo::dji_neo)
+```
+
+Or install a package with `cmake --install build --prefix /your/sdk/prefix`, then
+use `find_package(dji_neo CONFIG REQUIRED)`. Static builds are the default;
+configure with `-DBUILD_SHARED_LIBS=ON` for a shared library. Disable tests in
+application/Android builds with `-DDJI_NEO_BUILD_TESTS=OFF`.
+
+Video output currently contains raw type-2 stream packets. The host still needs
+`hevcdepay` and TS muxing. JNI and the Java/Kotlin adapter remain pending.
