@@ -40,7 +40,7 @@ install(FILES ${CMAKE_CURRENT_BINARY_DIR}/dji_neoConfig.cmake
 
 if(DJI_NEO_BUILD_TESTS)
     enable_testing()
-    foreach(suite sdk commands activation capture telemetry)
+    foreach(suite sdk commands activation capture telemetry signing)
         add_executable(test_${suite} tests/test_${suite}.c)
         target_link_libraries(test_${suite} PRIVATE dji_neo)
         target_compile_options(test_${suite} PRIVATE -Wall -Wextra -Wpedantic -UNDEBUG)

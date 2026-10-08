@@ -68,12 +68,32 @@ IDs have usable signing state. A sign function alone, or readiness returning
 zero, never grants `has_actuation`. The SDK supplies session ID, body ID, f45,
 sub-counter, DUML, and mutable RC subheader to `sign`. The first four subheader
 bytes (body ID/f45) must remain unchanged; the signer may fill bytes 4..11.
-The host owns session keys, readiness, and any signer reset/retry policy.
+The host owns signing state, any key establishment, readiness, and signer
+reset/retry policy. The wire field's actual algorithm and any keying are not
+yet recovered; do not infer working DJI signing from a nonzero test marker.
+
+When `ready` returns 1, **every type-5 uplink** goes through `sign`: subscription
+replay, liveview, centered sticks, heartbeat/query, and actuation. Signing passive
+activation does not require command arm, takeover confirmation, or stick enable;
+those gates still apply to all actuation. CONNECT and type-4 keepalive do not
+call the signer. When `ready` is missing/returns 0, passive uplink remains
+unsigned, `has_actuation` remains 0, and movement is refused.
+
+A ready signer declining a packet, or changing its protected body ID/f45 bytes,
+returns `DJI_NEO_EAUTH` without sending that packet; there is no automatic
+unsigned downgrade. Receive/decode and scheduled type-4 keepalives remain
+independent. Signing/send failures do not advance the SDK's type-5 counters or
+activation position. The host must handle signer retry state: a signature is
+computed before `udp_send`, and `EIO` may require signing the same counters
+again. A successful send means socket acceptance, not drone acceptance.
 
 The actual DJI rolling-code algorithm is not implemented. Test signers use a
 fixed marker solely to verify propagation and gates. They must not be used to
-claim real actuation capability. Passive subscriptions, heartbeat, liveview,
-and receive/decode never call `sign`, even when a declining signer is installed.
+claim real actuation capability. Receive/decode never call `sign`, even when a
+ready declining signer is installed. Signer-free decoding is a structural API
+guarantee, not proof that unsigned activation elicits OSD or video on a fresh
+Neo session. The app agent reported ACK-only/no OSD/video for its unsigned live
+session; the cause and rolling-code algorithm still need controlled validation.
 
 ## Activation and sessions
 
@@ -91,6 +111,14 @@ has 25 frames at a median 50 ms, so fresh-session effectiveness remains a live
 test item. Subscription payloads preserve opaque nested values from the supplied
 capture profile; only the outer DUML sequence/CRC is regenerated. They are not
 claimed to be a universal negotiated profile for every firmware/client.
+
+The requested full-session ~55-kind replacement profile is pending the app's
+exact `neosub_frames.h`/kind definition. The current 127-template profile has
+13 distinct `(source,destination,cmd_type,cmd_set,cmd_id)` tuples. The sanitized
+capture contains multiple sessions and a CONNECT about 4.034 s into the file;
+simply deduplicating the first 9.6 s gives different counts and also includes
+sticks/gimbal control. Do not mistake those counts for a validated replacement
+or replay captured movement as passive activation.
 
 Keepalive is emitted every 20 ms. By default it starts from repeated big-endian
 body ID pairs; hosts may supply a 26-byte session seed via config or
@@ -114,6 +142,11 @@ frames, 361 sticks, and 39 heartbeats byte-for-byte. A golden complete type-5
 gimbal datagram checks wrapper length/XOR, endian fields, subheader, and DUML.
 The separate UDP loopback test uses the same command checks and reports a skip
 when the runtime denies sockets. No live-drone commands were transmitted.
+
+The signing suite verifies all mutable subheader bytes on emitted activation
+packets, signed queries, no gate bypass, signer rejection, corrupted identity,
+send failure/counter retry, unsigned degradation, readiness-loss revocation,
+and OSD/video delivery with a ready declining signer.
 
 JNI implementation is pending; it should mirror the C API mechanically, with
 lifecycle/listener adaptation in pure Java/Kotlin above it.

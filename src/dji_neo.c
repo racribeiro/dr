@@ -106,7 +106,12 @@ static dji_neo_result_t send_command(dji_neo_t *n, const uint8_t *frame,
     put16(r.rc_subheader + 2, r.field45);
     r.rc_subheader[8] = r.counter; r.rc_subheader[9] = 1; r.rc_subheader[10] = 0x60;
     uint8_t identity[4]; memcpy(identity, r.rc_subheader, sizeof identity);
-    if (actuating && n->signer.sign(n->signer.user, &r) != 0) return DJI_NEO_EAUTH;
+    /* Receive/decode never depends on this optional uplink hook. Unavailable
+     * signing state leaves neutral activation/queries on their unsigned path;
+     * a ready signer may sign every type-5, not just gated actuation. Never
+     * silently downgrade a ready signer's rejection to an unsigned packet. */
+    if ((actuating || ready(n)) && n->signer.sign(n->signer.user, &r) != 0)
+        return DJI_NEO_EAUTH;
     if (memcmp(identity, r.rc_subheader, sizeof identity) != 0) return DJI_NEO_EAUTH;
     uint8_t body[12 + DJI_NEO_MAX_DUML];
     memcpy(body, r.rc_subheader, 12); memcpy(body + 12, frame, size);

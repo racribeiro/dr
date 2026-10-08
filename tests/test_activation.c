@@ -6,12 +6,13 @@ typedef struct {
     uint8_t counter;
     unsigned view, stick, heartbeat, subscription;
     uint64_t now, last_stick;
-    int has_stick, saw_deflection, saw_recenter;
+    int has_stick, saw_deflection, saw_recenter, signing;
 } activation_io_t;
 static int capture(void *user, const uint8_t *p, size_t size) {
     activation_io_t *a = user;
     test_wire(p, size);
     if (p[6] == 5) {
+        assert(p[19] == (a->signing ? 0xa5 : 0));
         assert(test_le16(p + 4) == a->f45 && p[16] == a->counter);
         assert(test_le16(p + 26) == a->seq);
         a->f45 = (uint16_t)(a->f45 + 8); ++a->counter; ++a->seq;
@@ -19,14 +20,14 @@ static int capture(void *user, const uint8_t *p, size_t size) {
         if (f[9] == 0x18 && f[10] == 0x47) {
             assert(f[15] == 0x1a && f[17] == (a->view < 2));
             assert(test_le16(f + 13) == (uint16_t)a->now);
-            assert(p[19] == 0); ++a->view;
+            ++a->view;
         } else if (f[9] == 1 && f[10] == 0x0a) {
             if (a->has_stick) assert(a->now - a->last_stick >= 52);
             a->last_stick = a->now; a->has_stick = 1; ++a->stick;
             static const uint8_t neutral[] = {0,4,0x20,0,1,8};
             int centered = memcmp(f + 14, neutral, sizeof neutral) == 0;
             if (!centered) { assert(p[19] == 0xa5); a->saw_deflection = 1; }
-            else { assert(p[19] == 0); if (a->saw_deflection) a->saw_recenter = 1; }
+            else { if (a->saw_deflection) a->saw_recenter = 1; }
         } else if (f[9] == 0 && f[10] == 1) ++a->heartbeat;
         else if (f[9] == 0x51) ++a->subscription;
     } else if (p[6] == 4 && a->seq) {
@@ -47,6 +48,7 @@ int main(void) {
     assert(a.view == 30 && a.stick >= 70 && a.heartbeat >= 26 && a.subscription >= 222);
     assert(a.io.signs == 0); /* Entire activation works without a signer. */
     test_arm_all(n, &a.io);
+    a.signing = 1;
     assert(dji_neo_set_stick(n, 660, -660, 0, 1, 4001) == DJI_NEO_OK);
     for (a.now = 4005; a.now <= 4700; a.now += 5) {
         if (a.now % 100 == 0) test_idle_telemetry(n, a.now);

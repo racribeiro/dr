@@ -111,14 +111,19 @@ typedef struct {
     size_t duml_size;
 } dji_neo_sign_request_t;
 
-/* Return 0 to authorise the command, nonzero to decline it. Signer may modify
- * subheader bytes 4..11; it must preserve body_id/f45 bytes 0..3. No signer means
+/* Return 0 to authorise the uplink, nonzero to decline it. When ready() returns
+ * 1, this hook is used for EVERY type-5 packet, including neutral activation,
+ * liveview, subscriptions, heartbeat, queries and gated actuation. Signer may
+ * modify subheader bytes 4..11; it must preserve body_id/f45 bytes 0..3. No signer means
  * has_actuation == 0. This hook is never invoked by receive, telemetry or
  * video data-plane paths. */
 typedef int (*dji_neo_sign_fn)(void *user, dji_neo_sign_request_t *request);
-/* Explicit session capability: return 1 only when session keys/state are ready.
+/* Explicit session capability: return 1 only when session signing state is ready.
  * A no-op or unavailable signer returns 0. Presence of sign() alone never
- * enables actuation. The host owns key establishment and signer state. */
+ * enables actuation. Unready/missing signing state skips the hook for passive
+ * uplink only; it cannot bypass actuation gates. A ready signer's rejection
+ * blocks that packet with EAUTH (no unsigned fallback). The host owns any key
+ * establishment and signer state; the rolling-code algorithm is not recovered. */
 typedef int (*dji_neo_signer_ready_fn)(void *user, uint16_t session_id, uint16_t body_id);
 
 typedef struct {
@@ -169,7 +174,8 @@ dji_neo_result_t dji_neo_set_stick_enabled(dji_neo_t *neo, int enabled);
 /* Conservative passive allowlist: currently only empty 00/01 heartbeat from
  * source 02 to destination 0e with command type 40. All other raw frames are
  * rejected, preventing a command from bypassing actuation gates via this API.
- * Does not require signing. Use typed APIs as more queries are validated. */
+ * Works unsigned when signing is unavailable; uses a ready optional signer.
+ * Use typed APIs as more queries are validated. */
 dji_neo_result_t dji_neo_send_query(dji_neo_t *neo, const uint8_t *duml, size_t size);
 
 /* Sends an actuation command only after every safety gate and signer approval.
@@ -189,7 +195,7 @@ dji_neo_result_t dji_neo_gimbal_set_rate(dji_neo_t *neo, int rate, uint64_t mono
 dji_neo_result_t dji_neo_gimbal_stop(dji_neo_t *neo);
 /* Deflections -660..660. poll emits signed non-neutral sticks at ~19 Hz and
  * returns to center after 600 ms without refresh. Passive centered heartbeat
- * is independent of actuation gates/signing. */
+ * is independent of actuation gates; it uses a ready optional signer. */
 dji_neo_result_t dji_neo_set_stick(dji_neo_t *neo, int roll, int pitch,
                                   int throttle, int yaw, uint64_t monotonic_ms);
 

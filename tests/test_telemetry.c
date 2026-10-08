@@ -12,7 +12,7 @@ static void video(void *user, const dji_neo_video_packet_t *v) {
     ++o->video;
 }
 int main(void) {
-    observed_t o = {0}; test_io_t io = {.reject_sign=1};
+    observed_t o = {0}; test_io_t io = {.reject_sign=1, .signer_ready=1};
     dji_neo_config_t cfg = {0};
     cfg.session_id = test_le16(OSD_DGRAM + 2); cfg.body_id = 0x707d;
     cfg.udp_send = test_send; cfg.udp_user = &io;

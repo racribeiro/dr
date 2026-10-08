@@ -6,13 +6,19 @@ drives `dji_neo_poll()`; the SDK creates no threads.
 
 Implemented: DUML builders/CRCs, type-5 RC wrapping, subscription replay,
 centered-stick heartbeat, finite liveview start bursts, gimbal enable/rate/stop,
-control keepalive, signed stick setpoints, and OSD telemetry decoding.
+control keepalive, signed stick setpoints, optional signing of all type-5
+activation/command uplink, and OSD telemetry decoding.
 
 Actuation requires a host-provided signer that explicitly reports readiness for
 the current session, plus session arm, command arm, takeover confirmation, and
-stick enable. Passive activation runs with no signer. The DJI rolling-code
+stick enable. Passive activation can transmit with no signer; when a signer
+reports ready it signs activation too. Receive/decode never needs signing.
+Unsigned activation is not proven to elicit rich OSD/video. The DJI rolling-code
 algorithm is still unavailable; internal tests use a mock signer and do not
 prove commands are accepted by a drone.
+
+The full-session activation-profile update remains pending the app's exact
+~55-kind frame list; the SDK still uses the supplied 127-template profile.
 
 See [integration and command usage](docs/INTEGRATION.md) and the public headers:
 [client API](include/dji_neo/dji_neo.h), [command builders](include/dji_neo/commands.h).
