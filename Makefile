@@ -1,7 +1,8 @@
 BUILD_DIR ?= build
 CMAKE ?= cmake
+PYTHON ?= python3
 
-.PHONY: all configure build test clean
+.PHONY: all configure build test clean activation-check
 
 all: build
 
@@ -16,3 +17,6 @@ test: build
 
 clean:
 	$(CMAKE) -E remove_directory $(BUILD_DIR)
+
+activation-check:
+	$(PYTHON) reference/tools/generate_activation.py --check src/activation_frames.inc

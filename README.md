@@ -17,8 +17,9 @@ Unsigned activation is not proven to elicit rich OSD/video. The DJI rolling-code
 algorithm is still unavailable; internal tests use a mock signer and do not
 prove commands are accepted by a drone.
 
-The full-session activation-profile update remains pending the app's exact
-~55-kind frame list; the SDK still uses the supplied 127-template profile.
+Activation uses 51 of the app's supplied 55 command kinds: liveview is scheduled
+separately and three credential queries are omitted. Flight/gimbal control is
+excluded from bootstrap. See the [profile and provenance](reference/activation/README.md).
 
 See [integration and command usage](docs/INTEGRATION.md) and the public headers:
 [client API](include/dji_neo/dji_neo.h), [command builders](include/dji_neo/commands.h).
@@ -32,6 +33,7 @@ POSIX sockets.
 make build  # configure and compile the static library
 make test   # build, then run CTest
 make clean  # remove generated build output
+make activation-check  # optional Python check of generated activation bytes
 ```
 
 `make` is equivalent to `make build`. Use `BUILD_DIR=out make test` to select a
@@ -40,6 +42,8 @@ different build directory.
 Tests compare builders byte-for-byte against the sanitized capture, validate
 the complete emitted gimbal datagram, and exercise gates, signer errors, send
 failures, counter wrap, activation cadence, stale inputs, and session loss.
+The full activation profile is checked byte-for-byte after resequencing, both
+unsigned and signed, including retry after a mid-batch send failure.
 The real OSD/CRC fixture is also registered in CTest. The UDP loopback test is
 reported as skipped if the environment denies socket creation.
 

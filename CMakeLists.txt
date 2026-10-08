@@ -40,7 +40,7 @@ install(FILES ${CMAKE_CURRENT_BINARY_DIR}/dji_neoConfig.cmake
 
 if(DJI_NEO_BUILD_TESTS)
     enable_testing()
-    foreach(suite sdk commands activation capture telemetry signing)
+    foreach(suite sdk commands activation activation_profile capture telemetry signing)
         add_executable(test_${suite} tests/test_${suite}.c)
         target_link_libraries(test_${suite} PRIVATE dji_neo)
         target_compile_options(test_${suite} PRIVATE -Wall -Wextra -Wpedantic -UNDEBUG)
@@ -50,6 +50,14 @@ if(DJI_NEO_BUILD_TESTS)
     set_tests_properties(udp_loopback PROPERTIES SKIP_RETURN_CODE 77)
     target_compile_definitions(test_capture PRIVATE
         CAPTURE_PATH="${CMAKE_CURRENT_SOURCE_DIR}/reference/captures/gimbalmove-sanitized.pcap")
+    target_compile_definitions(test_activation_profile PRIVATE
+        PROFILE_PATH="${CMAKE_CURRENT_SOURCE_DIR}/reference/activation/app-profile-55.txt")
+    find_package(Python3 QUIET COMPONENTS Interpreter)
+    if(Python3_Interpreter_FOUND)
+        add_test(NAME activation_generated COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/reference/tools/generate_activation.py
+            --check ${CMAKE_CURRENT_SOURCE_DIR}/src/activation_frames.inc)
+    endif()
     add_executable(test_realframes reference/tests/test_realframes.c)
     target_include_directories(test_realframes PRIVATE src)
     target_link_libraries(test_realframes PRIVATE dji_neo)

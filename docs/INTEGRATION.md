@@ -97,7 +97,7 @@ session; the cause and rolling-code algorithm still need controlled validation.
 
 ## Activation and sessions
 
-After CONNECT acceptance, poll emits the 127-frame subscription profile in
+After CONNECT acceptance, poll emits the 51-frame bootstrap profile in
 batches of at most four per poll and repeats it every 2 s. It sends 00/01
 heartbeat every 150 ms, neutral 01/0a every 52 ms, and a finite 30-frame liveview
 burst every 66 ms after the first subscription batch completes. The first two
@@ -112,13 +112,21 @@ test item. Subscription payloads preserve opaque nested values from the supplied
 capture profile; only the outer DUML sequence/CRC is regenerated. They are not
 claimed to be a universal negotiated profile for every firmware/client.
 
-The requested full-session ~55-kind replacement profile is pending the app's
-exact `neosub_frames.h`/kind definition. The current 127-template profile has
-13 distinct `(source,destination,cmd_type,cmd_set,cmd_id)` tuples. The sanitized
-capture contains multiple sessions and a CONNECT about 4.034 s into the file;
-simply deduplicating the first 9.6 s gives different counts and also includes
-sticks/gimbal control. Do not mistake those counts for a validated replacement
-or replay captured movement as passive activation.
+The source is the app agent's exact 55-frame `neosub_frames.h` artifact,
+versioned as `reference/activation/app-profile-55.txt`. Preserve the supplied
+order (00/01 first), but remove 18/47 because liveview has a separate finite
+schedule, and remove credential GETs 07/07, 07/0c, 07/0e. Neither cmd_set 01 nor
+04 is allowed in the profile: centered sticks and gated gimbal/flight control
+are separate code paths. The remaining 51 frames use fresh outer DUML sequence
+and CRC values per send. Capture-specific nested payloads are left untouched.
+
+This chooses the exact provided app artifact, not a new finer-key extraction.
+Its upstream rule used only `(cmd_set,cmd_id)` over a file-relative 0..9.6 s
+window, including a pre-CONNECT prefix. It can collapse distinct receivers,
+reply kinds and nested subscription topics. The independently supplied PCAP is
+not asserted to regenerate these exact bytes. Additional/finer profiles and
+fresh-session negotiation need separate capture-backed verification; counts
+alone are not activation evidence. See `reference/activation/README.md`.
 
 Keepalive is emitted every 20 ms. By default it starts from repeated big-endian
 body ID pairs; hosts may supply a 26-byte session seed via config or
@@ -142,6 +150,14 @@ frames, 361 sticks, and 39 heartbeats byte-for-byte. A golden complete type-5
 gimbal datagram checks wrapper length/XOR, endian fields, subheader, and DUML.
 The separate UDP loopback test uses the same command checks and reports a skip
 when the runtime denies sockets. No live-drone commands were transmitted.
+
+The activation-profile suite validates all 55 original DUML lengths/CRCs and
+compares all 51 retained emitted frames against their original bytes after
+only outer resequencing/CRC changes. Both unsigned and ready-signed replay,
+periodic rebroadcast, separate liveview, neutral sticks, mid-batch send-failure
+retry, and closed movement gates are covered. If Python is available, CTest
+also checks the generated table against its source fixture; normal SDK builds
+do not need Python.
 
 The signing suite verifies all mutable subheader bytes on emitted activation
 packets, signed queries, no gate bypass, signer rejection, corrupted identity,

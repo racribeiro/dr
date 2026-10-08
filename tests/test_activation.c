@@ -45,7 +45,7 @@ int main(void) {
         if (a.now % 100 == 0) test_idle_telemetry(n, a.now);
         assert(dji_neo_poll(n, a.now) == DJI_NEO_OK);
     }
-    assert(a.view == 30 && a.stick >= 70 && a.heartbeat >= 26 && a.subscription >= 222);
+    assert(a.view == 30 && a.stick >= 70 && a.heartbeat >= 26 && a.subscription == 4);
     assert(a.io.signs == 0); /* Entire activation works without a signer. */
     test_arm_all(n, &a.io);
     a.signing = 1;
