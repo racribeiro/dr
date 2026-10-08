@@ -1,4 +1,4 @@
-# DJI Neo C SDK
+# DJI Neo C / Java SDK
 
 C11 SDK for encoding DJI commands and driving a Neo Wi-Fi/UDP session from
 `dji-evasive` or another host application. The host owns its UDP socket and
@@ -34,10 +34,16 @@ make build  # configure and compile the static library
 make test   # build, then run CTest
 make clean  # remove generated build output
 make activation-check  # optional Python check of generated activation bytes
+make java-test  # optional Java/JNI build + C and JVM integration tests (JDK 11+)
 ```
 
 `make` is equivalent to `make build`. Use `BUILD_DIR=out make test` to select a
 different build directory.
+
+Java is opt-in; C-only builds do not need a JDK. `make java` produces
+`build/java/bindings/java/dji-neo.jar` and `libdji_neo_jni.so` (platform library
+extension varies). The Java API targets Java 8; building it requires JDK 11+.
+See [Java/JNI integration](bindings/java/README.md), including Android setup.
 
 Tests compare builders byte-for-byte against the sanitized capture, validate
 the complete emitted gimbal datagram, and exercise gates, signer errors, send
@@ -60,4 +66,6 @@ configure with `-DBUILD_SHARED_LIBS=ON` for a shared library. Disable tests in
 application/Android builds with `-DDJI_NEO_BUILD_TESTS=OFF`.
 
 Video output currently contains raw type-2 stream packets. The host still needs
-`hevcdepay` and TS muxing. JNI and the Java/Kotlin adapter remain pending.
+`hevcdepay` and TS muxing. The thin JNI mirror and a separate pure-Java telemetry
+adapter are implemented; Android/device validation and genuine signing remain
+pending. No working rolling-code algorithm or on-drone acceptance is claimed.

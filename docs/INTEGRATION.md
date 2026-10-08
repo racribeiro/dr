@@ -164,5 +164,18 @@ packets, signed queries, no gate bypass, signer rejection, corrupted identity,
 send failure/counter retry, unsigned degradation, readiness-loss revocation,
 and OSD/video delivery with a ready declining signer.
 
-JNI implementation is pending; it should mirror the C API mechanically, with
-lifecycle/listener adaptation in pure Java/Kotlin above it.
+The optional JNI implementation mirrors the C API mechanically. `NativeNeo`
+returns C result codes unchanged, with owner-thread/reentry/lifecycle checks in
+Java. `Commands` mirrors the pure builders. `NeoClient` is a separate pure-Java
+adapter for structured telemetry/listeners. JNI uses the calling thread's
+`JNIEnv` only during an API entry; it creates no threads and does not attach to
+the JVM. Packet callbacks receive owned copies. See
+[Java/JNI integration](../bindings/java/README.md).
+
+The desktop `java_jni` test runs under `-Xcheck:jni` and verifies the captured
+gimbal builder and complete golden command datagram through Java, real OSD
+decoding, signer isolation/readiness/rejection, four gates, activation, callback
+exception propagation, array validation, reentry, wrong-thread/use-after-close
+rejection and repeated signer replacement/cleanup. The test signer is still a
+mock. Android cross-compilation/device use and genuine on-drone effects remain
+unverified.

@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.20)
 project(dji_neo_sdk VERSION 0.1.0 LANGUAGES C)
 
 option(DJI_NEO_BUILD_TESTS "Build SDK tests" ON)
+option(DJI_NEO_BUILD_JAVA "Build optional JNI library and Java API" OFF)
 
 add_library(dji_neo
     src/dji_neo.c
@@ -63,4 +64,8 @@ if(DJI_NEO_BUILD_TESTS)
     target_link_libraries(test_realframes PRIVATE dji_neo)
     target_compile_options(test_realframes PRIVATE -UNDEBUG)
     add_test(NAME realframes COMMAND test_realframes)
+endif()
+
+if(DJI_NEO_BUILD_JAVA)
+    add_subdirectory(bindings/java)
 endif()
