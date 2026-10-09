@@ -141,12 +141,19 @@ public final class TestJava {
         }
         check(Commands.buildGimbalKeepalive(out, 0) > 0, "control keepalive builder");
         check(Commands.buildLiveview(out, 0, 1, true) > 0, "liveview builder");
+        check(Commands.buildLiveviewEx(out, 0, 1, 0x2f, true) == 23 && out[15] == 0x2f,
+                "opaque liveview token");
+        check(Commands.dumlValid(Arrays.copyOf(out, 23)), "extended liveview CRC");
+        check(Commands.buildLiveviewEx(out, 0, 1, 256, true) == NativeNeo.EINVAL, "token overflow");
     }
     private static void commands(String root) throws Exception {
         Io io = new Io();
         try (NativeNeo n = client(io, true)) {
             check(n.gimbalStart() == NativeNeo.ESTATE, "closed gates");
             ok(n.setKeepaliveBody(new byte[26])); ok(n.setKeepaliveBody(null));
+            ok(n.setLiveviewProfile(0x2f, 50));
+            throwsType(IllegalArgumentException.class, () -> n.setLiveviewProfile(256, 50));
+            throwsType(IllegalArgumentException.class, () -> n.setLiveviewProfile(0x2f, 19));
             io.reenter = true; connect(n); io.reenter = false;
             check(n.getCapabilities() == NativeNeo.CAP_LINK, "unsigned capability");
             check(n.gimbalStart() == NativeNeo.ESTATE, "unsigned movement");
@@ -186,7 +193,8 @@ public final class TestJava {
             s.readyThrow = false;
             n.setSigner(null); check(n.getCapabilities() == 1, "remove signer");
             check(n.restartLiveview() == NativeNeo.ESTATE, "activation disabled");
-            ok(n.setSessionArmed(false)); ok(n.resetSession(0x1234, 0x5678));
+            ok(n.setSessionArmed(false)); ok(n.resetSession(0x1234, 0x5078));
+            throwsType(IllegalArgumentException.class, () -> n.resetSession(0x1234, 0x5678));
         }
         io.neo.close(); // Idempotent.
         throwsType(IllegalStateException.class, () -> io.neo.poll(3));
@@ -243,7 +251,7 @@ public final class TestJava {
         }
         // Repeated create/replace/destroy exercises JNI global/local ref cleanup.
         for (int i = 0; i < 300; ++i) {
-            try (NativeNeo n = new NativeNeo(i, i + 1, true, p -> 0)) {
+            try (NativeNeo n = new NativeNeo(i, (i + 1) & 0xf8ff, true, p -> 0)) {
                 n.setSigner(new MarkerSigner()); n.setSigner(new MarkerSigner()); n.setSigner(null);
             }
         }

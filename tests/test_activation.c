@@ -36,7 +36,7 @@ static int capture(void *user, const uint8_t *p, size_t size) {
     return test_send(&a->io, p, size);
 }
 int main(void) {
-    activation_io_t a = {0};
+    activation_io_t a = {.f45=TEST_FIRST_F45, .counter=1};
     dji_neo_config_t cfg = {0}; cfg.udp_send = capture; cfg.udp_user = &a;
     cfg.session_id = 0x4fb0; cfg.body_id = 0x707d;
     dji_neo_t *n = dji_neo_create(&cfg); assert(n);

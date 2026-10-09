@@ -1,10 +1,11 @@
 #include "dji_neo/dji_neo.h"
 #include "dji_neo/commands.h"
+#include "link_ack.h"
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
-enum { HEADER = 8, CONNECT = 0, TELEMETRY = 1, VIDEO = 2, KEEPALIVE = 4, COMMAND = 5 };
+enum { HEADER = 8, CONNECT = 0, TELEMETRY = 1, VIDEO = 2, AUXILIARY = 3, KEEPALIVE = 4, COMMAND = 5 };
 enum { KA_MS = 20, CONNECT_MS = 1000, LOST_MS = 2000, HEARTBEAT_MS = 150,
        STICK_MS = 52, HOLD_MS = 600, SUB_MS = 2000, VIEW_MS = 66, VIEW_COUNT = 30 };
 typedef struct {
@@ -20,9 +21,14 @@ struct dji_neo {
     dji_neo_link_state_t state, notified_state;
     uint16_t field45, last_field45, sequence;
     uint8_t counter;
+    uint16_t peer_ack;
+    neo_video_rx_t video_rx;
+    neo_rx_t auxiliary_rx;
+    uint8_t liveview_token;
+    uint16_t liveview_interval;
     int session_armed, session_used, command_armed, takeover, stick_enabled;
     int clock_set, connect_sent, has_type5;
-    uint64_t now, connect_at, last_telemetry, ka_at;
+    uint64_t now, connect_at, last_telemetry, last_rx, ka_at;
     uint64_t heartbeat_at, stick_at, sub_at, view_at;
     size_t sub_index;
     unsigned view_count;
@@ -36,6 +42,15 @@ struct dji_neo {
 
 static uint16_t le16(const uint8_t *p) { return (uint16_t)(p[0] | ((uint16_t)p[1] << 8)); }
 static void put16(uint8_t *p, uint16_t value) { p[0] = (uint8_t)value; p[1] = (uint8_t)(value >> 8); }
+static void wire_reset(dji_neo_t *n) {
+    /* CONNECT stores body_id in BE; sequence words interpret those bytes LE. */
+    uint16_t seed = (uint16_t)((n->cfg.body_id >> 8) | (n->cfg.body_id << 8));
+    n->peer_ack = n->last_field45 = seed;
+    n->field45 = (uint16_t)(seed + 8); n->counter = 1;
+    n->sequence = 0; n->has_type5 = 0;
+    memset(&n->video_rx, 0, sizeof n->video_rx);
+    neo_rx_reset(&n->video_rx.rx,seed); neo_rx_reset(&n->auxiliary_rx,seed);
+}
 static void center(dji_neo_t *n) { for (unsigned i = 0; i < 4; ++i) n->sticks[i] = 1024; }
 static void revoke(dji_neo_t *n) {
     n->command_armed = n->takeover = n->stick_enabled = 0;
@@ -59,6 +74,7 @@ static dji_neo_result_t actuation_gate(dji_neo_t *n) {
     if (!n) return DJI_NEO_EINVAL;
     if (!link_open(n) || !n->command_armed || !n->takeover || !n->stick_enabled)
         return DJI_NEO_ESTATE;
+    if (n->now-n->last_telemetry>=LOST_MS) { revoke(n); return DJI_NEO_ESTATE; }
     if (!ready(n)) { revoke(n); return DJI_NEO_EAUTH; }
     return DJI_NEO_OK;
 }
@@ -101,8 +117,7 @@ static dji_neo_result_t send_command(dji_neo_t *n, const uint8_t *frame,
     r.session_id = n->cfg.session_id; r.body_id = n->cfg.body_id;
     r.field45 = n->field45; r.counter = n->counter;
     r.duml = frame; r.duml_size = size;
-    r.rc_subheader[0] = (uint8_t)(r.body_id >> 8);
-    r.rc_subheader[1] = (uint8_t)r.body_id;
+    put16(r.rc_subheader, n->peer_ack);
     put16(r.rc_subheader + 2, r.field45);
     r.rc_subheader[8] = r.counter; r.rc_subheader[9] = 1; r.rc_subheader[10] = 0x60;
     uint8_t identity[4]; memcpy(identity, r.rc_subheader, sizeof identity);
@@ -167,10 +182,10 @@ static dji_neo_result_t activation_tick(dji_neo_t *n) {
         }
     }
     if (n->first_sub_done && n->view_count < VIEW_COUNT && n->now >= n->view_at) {
-        r = send_built(n, frame, dji_neo_build_liveview(frame, sizeof frame, n->sequence,
-                       (uint16_t)n->now, n->view_count < 2), 0);
+        r = send_built(n, frame, dji_neo_build_liveview_ex(frame, sizeof frame, n->sequence,
+                       (uint16_t)n->now, n->liveview_token, n->view_count < 2), 0);
         if (r != DJI_NEO_OK) return r;
-        ++n->view_count; n->view_at = n->now + VIEW_MS;
+        ++n->view_count; n->view_at = n->now + n->liveview_interval;
     }
     return DJI_NEO_OK;
 }
@@ -195,9 +210,12 @@ static dji_neo_result_t gimbal_tick(dji_neo_t *n) {
 }
 
 dji_neo_t *dji_neo_create(const dji_neo_config_t *cfg) {
-    if (!cfg || !cfg->udp_send) return NULL;
+    if (!cfg || !cfg->udp_send || ((cfg->body_id >> 8) & 7)) return NULL;
     dji_neo_t *n = calloc(1, sizeof *n);
-    if (n) { n->cfg = *cfg; center(n); }
+    if (n) {
+        n->cfg = *cfg; center(n); wire_reset(n);
+        n->liveview_token = 0x1a; n->liveview_interval = VIEW_MS;
+    }
     return n;
 }
 void dji_neo_destroy(dji_neo_t *n) { free(n); }
@@ -212,9 +230,10 @@ dji_neo_link_state_t dji_neo_link_state(const dji_neo_t *n) { return n ? n->stat
 dji_neo_result_t dji_neo_reset_session(dji_neo_t *n, uint16_t session, uint16_t body) {
     if (!n) return DJI_NEO_EINVAL;
     if (n->session_armed) return DJI_NEO_ESTATE;
+    if ((body >> 8) & 7) return DJI_NEO_EINVAL;
     if (n->session_used && session == n->cfg.session_id && body == n->cfg.body_id) return DJI_NEO_EINVAL;
     n->cfg.session_id = session; n->cfg.body_id = body;
-    n->field45 = n->last_field45 = n->sequence = n->counter = 0;
+    wire_reset(n);
     n->connect_sent = n->has_type5 = n->session_used = 0;
     memset(n->cfg.keepalive_body, 0, sizeof n->cfg.keepalive_body);
     revoke(n); activation_reset(n); n->state = DJI_NEO_LINK_IDLE;
@@ -238,6 +257,14 @@ dji_neo_result_t dji_neo_restart_liveview(dji_neo_t *n) {
     if (!n) return DJI_NEO_EINVAL;
     if (!link_open(n) || n->cfg.disable_activation) return DJI_NEO_ESTATE;
     n->view_count = 0; n->view_at = n->now;
+    return DJI_NEO_OK;
+}
+dji_neo_result_t dji_neo_set_liveview_profile(dji_neo_t *n, uint8_t token,
+                                             uint16_t interval_ms) {
+    if (!n || interval_ms < 20 || interval_ms > 1000) return DJI_NEO_EINVAL;
+    if (n->session_armed && !link_open(n)) return DJI_NEO_ESTATE;
+    n->liveview_token = token; n->liveview_interval = interval_ms;
+    /* Explicit restart is separate; a setter cannot silently send traffic. */
     return DJI_NEO_OK;
 }
 dji_neo_result_t dji_neo_set_command_armed(dji_neo_t *n, int armed) {
@@ -331,23 +358,20 @@ dji_neo_result_t dji_neo_poll(dji_neo_t *n, uint64_t ms) {
         }
         return DJI_NEO_OK;
     }
-    if (ms - n->last_telemetry >= LOST_MS) {
+    if (ms - n->last_rx >= LOST_MS) {
         revoke(n); n->state = DJI_NEO_LINK_LOST; n->session_armed = 0;
         notify_state(n); return DJI_NEO_OK;
     }
-    if (n->command_armed && !ready(n)) revoke(n);
+    if (n->command_armed && (ms-n->last_telemetry>=LOST_MS || !ready(n))) revoke(n);
     if (ms >= n->ka_at) {
-        uint8_t body[26]; memcpy(body, n->cfg.keepalive_body, sizeof body);
-        int seeded = 0;
-        for (unsigned i = 0; i < sizeof body; ++i) seeded |= body[i];
-        if (!seeded) {
-            for (unsigned i = 0; i < 3; ++i) {
-                body[8*i] = body[8*i+2] = (uint8_t)(n->cfg.body_id >> 8);
-                body[8*i+1] = body[8*i+3] = (uint8_t)n->cfg.body_id;
-            }
-        }
-        if (n->has_type5) put16(body + 18, n->last_field45);
-        dji_neo_result_t r = emit(n, KEEPALIVE, 0, body, sizeof body);
+        uint8_t body[2*NEO_ACK_MAX_SIZE+10];
+        size_t offset=neo_rx_encode(&n->video_rx.rx,body);
+        offset+=neo_rx_encode(&n->auxiliary_rx,body+offset);
+        /* Third channel remains compact. Experimental seed only supplies its
+         * opaque bytes 4..7 and the trailer, never masks for receive channels. */
+        put16(body+offset,n->peer_ack); put16(body+offset+2,n->last_field45);
+        memcpy(body+offset+4,n->cfg.keepalive_body+20,6); offset+=10;
+        dji_neo_result_t r = emit(n, KEEPALIVE, 0, body, offset);
         if (r != DJI_NEO_OK) return r;
         n->ka_at = ms + KA_MS;
     }
@@ -383,16 +407,32 @@ dji_neo_result_t dji_neo_on_datagram(dji_neo_t *n, const uint8_t *data,
     uint8_t type; const uint8_t *body; size_t body_size;
     if (!n || !unwrap(data, size, &type, &body, &body_size)) return DJI_NEO_EINVAL;
     if (n->session_armed && le16(data + 2) != n->cfg.session_id) return DJI_NEO_EINVAL;
-    if (type != CONNECT && type != TELEMETRY && type != VIDEO) return DJI_NEO_EINVAL;
+    if (type != CONNECT && type != TELEMETRY && type != VIDEO && type != AUXILIARY) return DJI_NEO_EINVAL;
     if (clock_update(n, ms) != DJI_NEO_OK) return DJI_NEO_EINVAL;
     if (type == CONNECT) {
         if (n->state != DJI_NEO_LINK_CONNECTING || !n->session_armed ||
             le16(data + 2) != n->cfg.session_id || body_size != 1 || body[0] != 1)
             return DJI_NEO_ESTATE;
-        n->state = DJI_NEO_LINK_CONNECTED; n->last_telemetry = ms;
+        n->state = DJI_NEO_LINK_CONNECTED; n->last_telemetry = n->last_rx = ms;
         n->ka_at = ms + KA_MS; activation_reset(n);
     } else if (type == TELEMETRY) {
-        if (link_open(n)) n->last_telemetry = ms;
+        if (link_open(n)) {
+            n->last_telemetry = n->last_rx = ms;
+            /* Recognize the observed sequence-pair prefix separately from
+             * lenient DUML scanning; a bare DUML frame must not be read as ACKs. */
+            neo_ack_block_t video, auxiliary;
+            if (neo_ack_parse(body,body_size,&video) && !(video.base&7) && !(video.high&7) &&
+                neo_ack_parse(body+video.size,body_size-video.size,&auxiliary) &&
+                !(auxiliary.base&7) && !(auxiliary.high&7) &&
+                body_size-video.size-auxiliary.size>=8) {
+                uint16_t ack = le16(body+video.size+auxiliary.size);
+                uint16_t delta = (uint16_t)(ack - n->peer_ack);
+                uint16_t sent = (uint16_t)(n->last_field45 - n->peer_ack);
+                /* Ignore stale/future/un-aligned acknowledgements. */
+                if (!(delta & 7) && delta < 0x8000 && sent < 0x8000 && delta <= sent)
+                    n->peer_ack = ack;
+            }
+        }
         for (size_t i = 0; i + 13 <= body_size; ++i) {
             if (body[i] != 0x55) continue;
             size_t length = (size_t)body[i + 1] | ((size_t)(body[i + 2] & 3) << 8);
@@ -400,9 +440,18 @@ dji_neo_result_t dji_neo_on_datagram(dji_neo_t *n, const uint8_t *data,
                 decode_osd(n, body + i, length); i += length - 1;
             }
         }
-    } else if (n->cfg.on_video) {
-        dji_neo_video_packet_t v = {body, body_size, ms, 1};
-        n->cfg.on_video(n->cfg.callback_user, &v);
+    } else {
+        if (link_open(n)) {
+            int valid=0;
+            if (type==VIDEO) valid=neo_video_arrive(&n->video_rx,le16(data+4),body,body_size);
+            else if (body_size>=8 && !(le16(body)&7) && !(le16(data+4)&7) && le16(data+4)==le16(body+2))
+                valid=neo_rx_arrive(&n->auxiliary_rx,le16(data+4));
+            if (valid) n->last_rx=ms;
+        }
+        if (type == VIDEO && n->cfg.on_video) {
+            dji_neo_video_packet_t v = {body, body_size, ms, 1};
+            n->cfg.on_video(n->cfg.callback_user, &v);
+        }
     }
     notify_state(n); return DJI_NEO_OK;
 }

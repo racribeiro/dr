@@ -163,6 +163,12 @@ JNIEXPORT jint JNICALL N(name)(JNIEnv *e, jclass cls, jlong h) { ENTER(); RETURN
 JNIEXPORT jint JNICALL N(name)(JNIEnv *e, jclass cls, jlong h, jboolean flag) { \
     ENTER(); RETURN(function(p->neo, flag)); }
 SIMPLE(nRestartLiveview, dji_neo_restart_liveview)
+JNIEXPORT jint JNICALL N(nSetLiveviewProfile)(JNIEnv *e, jclass cls, jlong h,
+                                            jint token, jint interval) {
+    ENTER();
+    if (token < 0 || token > 255 || interval < 20 || interval > 1000) RETURN(DJI_NEO_EINVAL);
+    RETURN(dji_neo_set_liveview_profile(p->neo, (uint8_t)token, (uint16_t)interval));
+}
 SIMPLE(nGimbalStart, dji_neo_gimbal_start)
 SIMPLE(nGimbalStop, dji_neo_gimbal_stop)
 GATE(nSetSessionArmed, dji_neo_set_session_armed)
@@ -254,6 +260,12 @@ JNIEXPORT jint JNICALL B(buildLiveview)(JNIEnv *e, jclass cls, jbyteArray out, j
                                        jint timer, jboolean edge) {
     BUILD_BEGIN(); if (!u16(timer)) return DJI_NEO_EINVAL;
     BUILD_RETURN(dji_neo_build_liveview(frame, cap, (uint16_t)sequence, (uint16_t)timer, edge));
+}
+JNIEXPORT jint JNICALL B(buildLiveviewEx)(JNIEnv *e, jclass cls, jbyteArray out, jint sequence,
+                                         jint timer, jint token, jboolean edge) {
+    BUILD_BEGIN(); if (!u16(timer) || token < 0 || token > 255) return DJI_NEO_EINVAL;
+    BUILD_RETURN(dji_neo_build_liveview_ex(frame, cap, (uint16_t)sequence,
+                                          (uint16_t)timer, (uint8_t)token, edge));
 }
 JNIEXPORT jint JNICALL B(buildStick)(JNIEnv *e, jclass cls, jbyteArray out, jint sequence,
                                     jintArray channels, jlong timer) {

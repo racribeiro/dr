@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(dji_neo_sdk VERSION 0.1.0 LANGUAGES C)
+project(dji_neo_sdk VERSION 0.2.0 LANGUAGES C)
 
 option(DJI_NEO_BUILD_TESTS "Build SDK tests" ON)
 option(DJI_NEO_BUILD_JAVA "Build optional JNI library and Java API" OFF)
@@ -8,6 +8,7 @@ add_library(dji_neo
     src/dji_neo.c
     src/duml.c
     src/commands.c
+    src/link_ack.c
 )
 add_library(dji_neo::dji_neo ALIAS dji_neo)
 target_compile_features(dji_neo PUBLIC c_std_11)
@@ -41,12 +42,13 @@ install(FILES ${CMAKE_CURRENT_BINARY_DIR}/dji_neoConfig.cmake
 
 if(DJI_NEO_BUILD_TESTS)
     enable_testing()
-    foreach(suite sdk commands activation activation_profile capture telemetry signing)
+    foreach(suite sdk commands activation activation_profile capture telemetry signing link_state link_ack)
         add_executable(test_${suite} tests/test_${suite}.c)
         target_link_libraries(test_${suite} PRIVATE dji_neo)
         target_compile_options(test_${suite} PRIVATE -Wall -Wextra -Wpedantic -UNDEBUG)
         add_test(NAME ${suite} COMMAND test_${suite})
     endforeach()
+    target_include_directories(test_link_ack PRIVATE src)
     add_test(NAME udp_loopback COMMAND test_commands --udp)
     set_tests_properties(udp_loopback PROPERTIES SKIP_RETURN_CODE 77)
     target_compile_definitions(test_capture PRIVATE
@@ -64,6 +66,12 @@ if(DJI_NEO_BUILD_TESTS)
     target_link_libraries(test_realframes PRIVATE dji_neo)
     target_compile_options(test_realframes PRIVATE -UNDEBUG)
     add_test(NAME realframes COMMAND test_realframes)
+    add_executable(review_capture tools/review_capture.c)
+    target_link_libraries(review_capture PRIVATE dji_neo)
+    target_include_directories(review_capture PRIVATE src)
+    target_compile_options(review_capture PRIVATE -Wall -Wextra -Wpedantic)
+    add_test(NAME capture_review COMMAND review_capture
+        ${CMAKE_CURRENT_SOURCE_DIR}/reference/captures/gimbalmove-sanitized.pcap)
 endif()
 
 if(DJI_NEO_BUILD_JAVA)

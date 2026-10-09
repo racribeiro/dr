@@ -11,6 +11,7 @@ typedef struct {
     unsigned sends, signs;
     int fail_send, reject_sign, corrupt_identity, signer_ready;
 } test_io_t;
+enum { TEST_SEED = 0x7d70, TEST_FIRST_F45 = TEST_SEED + 8 };
 static inline uint16_t test_le16(const uint8_t *p) { return (uint16_t)(p[0] | ((uint16_t)p[1] << 8)); }
 static inline int test_send(void *user, const uint8_t *p, size_t size) {
     test_io_t *io = user;
@@ -71,7 +72,6 @@ static inline void test_wire(const uint8_t *p, size_t size) {
     uint8_t x = 0; for (unsigned i = 0; i < 7; ++i) x ^= p[i]; assert(x == p[7]);
     if (p[6] == 5) {
         assert(size >= 33 && test_le16(p + 4) == test_le16(p + 10));
-        assert(p[8] == 0x70 && p[9] == 0x7d);
         assert(dji_neo_duml_valid(p + 20, size - 20));
     } else assert(test_le16(p + 4) == 0);
 }

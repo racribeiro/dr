@@ -29,17 +29,17 @@ int main(void) {
     test_wire(io.last, io.size);
     int hb = dji_neo_build_heartbeat(frame, sizeof frame, 0);
     assert(dji_neo_send_query(n, frame, (size_t)hb) == DJI_NEO_OK);
-    assert(test_le16(io.last + 4) == 0 && io.last[16] == 0);
+    assert(test_le16(io.last + 4) == TEST_FIRST_F45 && io.last[16] == 1);
     assert(dji_neo_send_query(n, frame, (size_t)hb) == DJI_NEO_OK);
-    assert(test_le16(io.last + 4) == 8 && io.last[16] == 1);
+    assert(test_le16(io.last + 4) == TEST_FIRST_F45 + 8 && io.last[16] == 2);
     assert(dji_neo_poll(n, 41) == DJI_NEO_OK);
     assert(io.last[6] == 4 && test_le16(io.last + 4) == 0);
-    assert(test_le16(io.last + 26) == 8); /* KA body offset 18 */
+    assert(test_le16(io.last + 26) == TEST_FIRST_F45 + 8); /* KA body offset 18 */
     /* Both counter widths wrap naturally; interleaved KA must not count. */
     for (unsigned i = 2; i <= 8192; ++i) {
         assert(dji_neo_send_query(n, frame, (size_t)hb) == DJI_NEO_OK);
-        assert(test_le16(io.last + 4) == (uint16_t)(i * 8));
-        assert(io.last[16] == (uint8_t)i);
+        assert(test_le16(io.last + 4) == (uint16_t)(TEST_FIRST_F45 + i * 8));
+        assert(io.last[16] == (uint8_t)(i + 1));
     }
     assert(dji_neo_poll(n, 40) == DJI_NEO_EINVAL);
     test_arm_all(n, &io);
@@ -54,7 +54,7 @@ int main(void) {
     assert(dji_neo_send_actuation(n, frame, (size_t)length) == DJI_NEO_EIO);
     assert(io.sends == before);
     assert(dji_neo_send_actuation(n, frame, (size_t)length) == DJI_NEO_OK);
-    assert(test_le16(io.last + 4) == 8 && io.last[16] == 1 && io.last[19] == 0xa5);
+    assert(test_le16(io.last + 4) == TEST_FIRST_F45 + 8 && io.last[16] == 2 && io.last[19] == 0xa5);
     io.signer_ready = 0;
     assert(dji_neo_send_actuation(n, frame, (size_t)length) == DJI_NEO_EAUTH);
     io.signer_ready = 1;
@@ -71,7 +71,7 @@ int main(void) {
     assert(test_le16(io.last + 2) == 0x4fb1 && io.last[8] == 0x70 && io.last[9] == 0x7e);
     dji_neo_destroy(n);
 
-    /* Retry is 1 s, starts at zero, and CONNECT never consumes command f45. */
+    /* Retry is 1 s; CONNECT never consumes the seeded command f45. */
     memset(&io, 0, sizeof io); n = test_client(&io, 1);
     assert(dji_neo_set_session_armed(n, 1) == DJI_NEO_OK);
     assert(dji_neo_poll(n, 0) == DJI_NEO_OK && io.sends == 1);
@@ -80,7 +80,7 @@ int main(void) {
     test_accept(n, 1001);
     hb = dji_neo_build_heartbeat(frame, sizeof frame, 0);
     assert(dji_neo_send_query(n, frame, (size_t)hb) == DJI_NEO_OK);
-    assert(test_le16(io.last + 4) == 0);
+    assert(test_le16(io.last + 4) == TEST_FIRST_F45);
     dji_neo_destroy(n);
     return 0;
 }

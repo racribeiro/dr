@@ -87,12 +87,16 @@ typedef struct {
     void *callback_user;
     /* Fresh, independently chosen identifiers for this connection attempt.
      * Do not reuse either after a reconnect. The SDK currently does not own an
-     * entropy source, so the host must provide them. */
+     * entropy source, so the host must provide them. body_id high-byte low
+     * three bits must be zero (e.g. random_u16 & 0xf8ff): its wire bytes seed
+     * the +8 sequence space; low sequence bits are protocol flags. Invalid
+     * alignment makes create return NULL / reset_session return EINVAL. */
     uint16_t session_id;
     uint16_t body_id;
-    /* Optional 26-byte keepalive seed. Zero selects the body_id fallback.
-     * The SDK updates bytes 18..19 with the last successfully sent type-5 f45.
-     * Other rolling fields are not yet fully reverse engineered. */
+    /* Legacy 26-byte experimental template: only bytes 20..25 supply the
+     * compact third channel's opaque fields and trailer. Bytes 0..19 are
+     * ignored: SDK generates all watermarks and variable receive ACK blocks.
+     * Zero is the default. Do not copy telemetry/DUML into this template. */
     uint8_t keepalive_body[26];
     /* Activation on CONNECTED is automatic unless explicitly disabled. */
     int disable_activation;
@@ -100,7 +104,10 @@ typedef struct {
 
 /* Complete state supplied to the optional type-5 signer. `rc_subheader` is
  * mutable: the signer writes the rolling-code/flag and any future fields. The
- * session id, body id, f45 and counter identify this particular uplink. */
+ * session id, bootstrap body id, f45 and counter identify this uplink.
+ * rc_subheader[0..1] is a LE peer acknowledgement, initialized from the BE
+ * CONNECT body-id bytes and advanced by validated type-1 receive state. It
+ * is NOT a fixed body-id field after connection. */
 typedef struct {
     uint16_t session_id;
     uint16_t body_id;
@@ -114,7 +121,7 @@ typedef struct {
 /* Return 0 to authorise the uplink, nonzero to decline it. When ready() returns
  * 1, this hook is used for EVERY type-5 packet, including neutral activation,
  * liveview, subscriptions, heartbeat, queries and gated actuation. Signer may
- * modify subheader bytes 4..11; it must preserve body_id/f45 bytes 0..3. No signer means
+ * modify subheader bytes 4..11; it must preserve SDK-owned ACK/f45 bytes 0..3. No signer means
  * has_actuation == 0. This hook is never invoked by receive, telemetry or
  * video data-plane paths. */
 typedef int (*dji_neo_sign_fn)(void *user, dji_neo_sign_request_t *request);
@@ -143,12 +150,17 @@ dji_neo_link_state_t dji_neo_link_state(const dji_neo_t *neo);
  * before rearming commands. There is no automatic reuse of lost session IDs. */
 dji_neo_result_t dji_neo_reset_session(dji_neo_t *neo, uint16_t session_id,
                                        uint16_t body_id);
-/* Optional per-session keepalive seed; NULL selects the body_id fallback.
- * Configure while disarmed, including after reset_session(). */
+/* Optional experimental keepalive template (only bytes 20..25 are used);
+ * NULL clears it. Configure while disarmed, including after reset_session(). */
 dji_neo_result_t dji_neo_set_keepalive_body(dji_neo_t *neo, const uint8_t body[26]);
 /* Explicitly request another finite liveview start burst on a connected link.
  * Useful if no video arrives. No implicit endless retry/start traffic. */
 dji_neo_result_t dji_neo_restart_liveview(dji_neo_t *neo);
+/* Configure opaque byte 4 and cadence (20..1000 ms; defaults 0x1a/66 ms).
+ * Allowed disarmed or connected; does not restart/send. Call restart_liveview
+ * separately for a new finite burst. Profile persists across session reset. */
+dji_neo_result_t dji_neo_set_liveview_profile(dji_neo_t *neo, uint8_t token,
+                                             uint16_t interval_ms);
 
 /* Session arm permits connect/keepalive and passive activation transmission. It is independent of
  * actuation signing and defaults off. Disarming clears every downstream gate. */
@@ -157,7 +169,8 @@ dji_neo_result_t dji_neo_set_session_armed(dji_neo_t *neo, int armed);
 /* Host-driven link pump. Call regularly (about every 5 ms) with a monotonic
  * clock. Callbacks run synchronously. The API is single-threaded and callbacks
  * must not reenter or destroy the client. Backward clock values are rejected.
- * LINK_LOST stops traffic until the host resets/rearms a fresh session. */
+ * Valid telemetry/video/type-3 receive keeps the link alive; stale telemetry
+ * still revokes actuation. LINK_LOST stops traffic until fresh reset/rearm. */
 dji_neo_result_t dji_neo_poll(dji_neo_t *neo, uint64_t monotonic_ms);
 
 /* Feed an incoming complete Wi-Fi/UDP payload. Data-plane decoding works

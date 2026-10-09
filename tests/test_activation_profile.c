@@ -52,8 +52,8 @@ static int capture_profile(void *user, const uint8_t *packet, size_t size) {
     profile_io_t *p = user;
     test_wire(packet, size);
     if (packet[6] != 5) return test_send(&p->io, packet, size);
-    assert(test_le16(packet + 4) == (uint16_t)(p->type5 * 8));
-    assert(packet[16] == (uint8_t)p->type5);
+    assert(test_le16(packet + 4) == (uint16_t)(TEST_FIRST_F45 + p->type5 * 8));
+    assert(packet[16] == (uint8_t)(p->type5 + 1));
     assert(packet[19] == (p->signing ? 0xa5 : 0));
     const uint8_t *frame = packet + 20;
     assert(test_le16(frame + 6) == (uint16_t)p->type5);

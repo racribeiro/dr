@@ -29,7 +29,8 @@ public final class NativeNeo implements AutoCloseable {
     public interface Signer {
         /** True only for genuine usable DJI signing state, never just a no-op hook. */
         boolean ready(int sessionId, int bodyId);
-        /** Zero accepts; mutate rcSubheader[4..11] only. DUML is a read-only copy.
+        /** Zero accepts; mutate rcSubheader[4..11] only. First four bytes are
+         * SDK-owned peer ACK/f45, not a fixed body ID. DUML is a read-only copy.
          * This is called for every type-5 uplink when ready. Signing can be retried
          * with identical counters after a UDP failure. No algorithm is provided here.
          */
@@ -42,7 +43,7 @@ public final class NativeNeo implements AutoCloseable {
     private boolean busy;
 
     public NativeNeo(int sessionId, int bodyId, boolean disableActivation, Callbacks callbacks) {
-        uint16(sessionId); uint16(bodyId);
+        uint16(sessionId); bodyId(bodyId);
         handle = nCreate(sessionId, bodyId, disableActivation, Objects.requireNonNull(callbacks));
         if (handle == 0) throw new OutOfMemoryError("Creating DJI Neo peer");
     }
@@ -57,6 +58,10 @@ public final class NativeNeo implements AutoCloseable {
     private void leave() { busy = false; }
     private static void uint16(int value) {
         if (value < 0 || value > 65535) throw new IllegalArgumentException("Expected uint16");
+    }
+    private static void bodyId(int value) {
+        uint16(value);
+        if (((value >>> 8) & 7) != 0) throw new IllegalArgumentException("Body ID must seed an aligned +8 sequence space");
     }
     private static void clock(long ms) {
         if (ms < 0) throw new IllegalArgumentException("Expected nonnegative monotonic milliseconds");
@@ -78,7 +83,7 @@ public final class NativeNeo implements AutoCloseable {
         long h = enter(); try { return nLinkState(h); } finally { leave(); }
     }
     public int resetSession(int sessionId, int bodyId) {
-        uint16(sessionId); uint16(bodyId);
+        uint16(sessionId); bodyId(bodyId);
         long h = enter(); try { return nResetSession(h, sessionId, bodyId); } finally { leave(); }
     }
     /** Null selects the C SDK's body-ID fallback. Otherwise exactly 26 bytes. */
@@ -88,6 +93,12 @@ public final class NativeNeo implements AutoCloseable {
     }
     public int restartLiveview() {
         long h = enter(); try { return nRestartLiveview(h); } finally { leave(); }
+    }
+    /** Opaque payload byte 4 and cadence; does not implicitly restart the burst. */
+    public int setLiveviewProfile(int token, int intervalMs) {
+        if (token < 0 || token > 255 || intervalMs < 20 || intervalMs > 1000)
+            throw new IllegalArgumentException("Expected byte token and 20..1000 ms cadence");
+        long h = enter(); try { return nSetLiveviewProfile(h, token, intervalMs); } finally { leave(); }
     }
     public int setSessionArmed(boolean armed) {
         long h = enter(); try { return nSetSessionArmed(h, armed); } finally { leave(); }
@@ -141,6 +152,7 @@ public final class NativeNeo implements AutoCloseable {
     private static native int nResetSession(long handle, int sessionId, int bodyId);
     private static native int nSetKeepaliveBody(long handle, byte[] body);
     private static native int nRestartLiveview(long handle);
+    private static native int nSetLiveviewProfile(long handle, int token, int intervalMs);
     private static native int nSetSessionArmed(long handle, boolean armed);
     private static native int nPoll(long handle, long monotonicMs);
     private static native int nOnDatagram(long handle, byte[] data, long monotonicMs);

@@ -12,7 +12,8 @@ Three small layers, with no networking or internal threads:
 No genuine DJI signing algorithm is supplied. A `Signer` is a host function
 implementing `ready(sessionId, bodyId)` and `sign(sessionId, bodyId, field45,
 counter, rcSubheader, duml)`. Only RC bytes 4..11 are writable; modifying DUML's
-Java copy has no effect. Missing/unready signing state allows unsigned passive
+Java copy has no effect. RC bytes 0..3 are SDK-owned peer ACK/f45, not a fixed
+body-ID prefix. Missing/unready signing state allows unsigned passive
 uplink and receive/decode, never actuation. A ready signer declining returns
 `EAUTH`, with no unsigned fallback. All four C safety gates still apply.
 
@@ -55,6 +56,7 @@ The Java layer rejects these cases before native entry.
 ```java
 // hostSend returns 0 only when the complete UDP datagram was accepted.
 // Choose fresh, independent session/body IDs on every connection attempt.
+// Align the body-ID high byte: bodyId = randomUint16 & 0xf8ff.
 try (NativeNeo neo = new NativeNeo(sessionId, bodyId, false,
         new NativeNeo.Callbacks() {
             @Override public int udpSend(byte[] packet) { return hostSend(packet); }
@@ -68,6 +70,12 @@ try (NativeNeo neo = new NativeNeo(sessionId, bodyId, false,
     // state and explicit operator approval. No mock signer on real hardware.
 }
 ```
+
+`setLiveviewProfile(token, intervalMs)` mirrors the C profile setter; it sends
+nothing by itself. Configure an opaque capture-derived token (e.g. 0x2f) and
+50 ms cadence for an explicit experiment, then use `restartLiveview()` for a new
+finite burst. `Commands.buildLiveviewEx()` accepts the same opaque token. These
+values are not a recovered video negotiation algorithm.
 
 All native packet input/output arrays are copied. Video/UDP callback arrays and
 `NeoClient.Telemetry` objects can be retained after return. No Java buffers are

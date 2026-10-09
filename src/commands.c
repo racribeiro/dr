@@ -7,8 +7,13 @@ int dji_neo_build_heartbeat(uint8_t *out, size_t cap, uint16_t seq) {
 
 int dji_neo_build_liveview(uint8_t *out, size_t cap, uint16_t seq,
                            uint16_t timer, int edge) {
+    return dji_neo_build_liveview_ex(out, cap, seq, timer, 0x1a, edge);
+}
+
+int dji_neo_build_liveview_ex(uint8_t *out, size_t cap, uint16_t seq,
+                              uint16_t timer, uint8_t token, int edge) {
     if (edge != 0 && edge != 1) return DJI_NEO_EINVAL;
-    uint8_t p[10] = {0, 8, (uint8_t)timer, (uint8_t)(timer >> 8), 0x1a, 0,
+    uint8_t p[10] = {0, 8, (uint8_t)timer, (uint8_t)(timer >> 8), token, 0,
                      (uint8_t)edge, 0, 0, 0};
     return dji_neo_duml_build(out, cap, 2, 0xe9, seq, 0, 0x18, 0x47, p, sizeof p);
 }

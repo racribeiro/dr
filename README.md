@@ -5,7 +5,9 @@ C11 SDK for encoding DJI commands and driving a Neo Wi-Fi/UDP session from
 drives `dji_neo_poll()`; the SDK creates no threads.
 
 Implemented: DUML builders/CRCs, type-5 RC wrapping, subscription replay,
-centered-stick heartbeat, finite liveview start bursts, gimbal enable/rate/stop,
+centered-stick heartbeat, configurable finite liveview start bursts, cumulative
+and selective receive ACKs with video retransmission tracking, session-seeded
+uplink counters, gimbal enable/rate/stop,
 control keepalive, signed stick setpoints, optional signing of all type-5
 activation/command uplink, and OSD telemetry decoding.
 
@@ -13,9 +15,10 @@ Actuation requires a host-provided signer that explicitly reports readiness for
 the current session, plus session arm, command arm, takeover confirmation, and
 stick enable. Passive activation can transmit with no signer; when a signer
 reports ready it signs activation too. Receive/decode never needs signing.
-Unsigned activation is not proven to elicit rich OSD/video. The DJI rolling-code
-algorithm is still unavailable; internal tests use a mock signer and do not
-prove commands are accepted by a drone.
+Unsigned sessions have produced rich OSD in the app's tests; sustained SDK video
+and on-drone commands remain unverified. Opaque RC fields are not fully understood:
+captures alone do not establish that all of them are cryptographic signatures.
+Internal tests use a mock signer and do not prove drone acceptance.
 
 Activation uses 51 of the app's supplied 55 command kinds: liveview is scheduled
 separately and three credential queries are omitted. Flight/gimbal control is
@@ -35,6 +38,7 @@ make test   # build, then run CTest
 make clean  # remove generated build output
 make activation-check  # optional Python check of generated activation bytes
 make java-test  # optional Java/JNI build + C and JVM integration tests (JDK 11+)
+make capture-review CAPTURE=/path/to/file.pcap  # offline clear-IP capture review
 ```
 
 `make` is equivalent to `make build`. Use `BUILD_DIR=out make test` to select a
@@ -52,6 +56,14 @@ The full activation profile is checked byte-for-byte after resequencing, both
 unsigned and signed, including retry after a mid-batch send failure.
 The real OSD/CRC fixture is also registered in CTest. The UDP loopback test is
 reported as skipped if the environment denies socket creation.
+Link tests cover seeded counters, complete variable-length ACK packets,
+fragment-aware retransmissions, missing/received two-bit statuses, malformed
+metadata, video-only liveness with stale-telemetry actuation revocation, sequence
+and message-ID wrap, and session reset. The offline reviewer checks DUML,
+liveview/ACK encoding and recovered original fragment sequences against private
+PCAPs without transmitting or printing GPS/credentials. Unresolved receive
+history is reported explicitly; a successful decode review alone is not proof
+of sustained recovery.
 
 ## Integrate
 
@@ -67,5 +79,6 @@ application/Android builds with `-DDJI_NEO_BUILD_TESTS=OFF`.
 
 Video output currently contains raw type-2 stream packets. The host still needs
 `hevcdepay` and TS muxing. The thin JNI mirror and a separate pure-Java telemetry
-adapter are implemented; Android/device validation and genuine signing remain
-pending. No working rolling-code algorithm or on-drone acceptance is claimed.
+adapter are implemented. See the [October capture review](docs/CAPTURE_REVIEW_20261009.md)
+for evidence and remaining abandonment/outgoing-retry/liveview-negotiation gaps. This is an
+implementation ready for controlled host testing, not a completed on-drone SDK.

@@ -88,7 +88,7 @@ int main(int argc, char **argv) {
         receive(&u, received, &size);
         int len = dji_neo_build_gimbal_enable(frame, sizeof frame, (uint16_t)stage, stage);
         assert(size == (size_t)len + 20 && memcmp(received + 20, frame, (size_t)len) == 0);
-        assert(test_le16(received + 4) == stage * 8 && received[16] == stage && received[19] == 0xa5);
+        assert(test_le16(received + 4) == TEST_FIRST_F45 + stage * 8 && received[16] == stage + 1 && received[19] == 0xa5);
     }
     assert(dji_neo_gimbal_start(n) == DJI_NEO_OK); empty(&u); /* idempotent */
     assert(dji_neo_gimbal_set_rate(n, -36, 1) == DJI_NEO_OK);

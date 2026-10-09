@@ -14,11 +14,10 @@ typedef struct {
 static int sign_all(void *user, dji_neo_sign_request_t *request) {
     signing_io_t *s = user;
     assert(request->session_id == 0x4fb0 && request->body_id == 0x707d);
-    assert(request->rc_subheader[0] == 0x70 && request->rc_subheader[1] == 0x7d);
     assert(test_le16(request->rc_subheader + 2) == request->field45);
     assert(request->rc_subheader[8] == request->counter);
-    assert(request->field45 == (uint16_t)(s->type5 * 8));
-    assert(request->counter == (uint8_t)s->type5);
+    assert(request->field45 == (uint16_t)(TEST_FIRST_F45 + s->type5 * 8));
+    assert(request->counter == (uint8_t)(s->type5 + 1));
     assert(request->rc_subheader[9] == 1 && request->rc_subheader[10] == 0x60);
     assert(dji_neo_duml_valid(request->duml, request->duml_size));
     ++s->io.signs;
@@ -119,7 +118,7 @@ int main(void) {
     assert(dji_neo_poll(n, 8) == DJI_NEO_EIO && s.io.sends == sends);
     assert(dji_neo_poll(n, 9) == DJI_NEO_OK);
     /* Three failed heartbeat attempts consumed no f45/DUML/sub-counter. */
-    assert(test_le16(s.signed_header + 2) == (uint16_t)((s.type5 - 1) * 8));
+    assert(test_le16(s.signed_header + 2) == (uint16_t)(TEST_FIRST_F45 + (s.type5 - 1) * 8));
     assert(s.io.signs == s.type5 + 3);
     dji_neo_destroy(n);
 

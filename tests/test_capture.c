@@ -36,7 +36,7 @@ int main(void) {
         } else if (f[9] == 4 && f[10] == 0x12 && len == 16) {
             got = dji_neo_build_gimbal_keepalive(built, sizeof built, seq); index = 2;
         } else if (f[9] == 0x18 && f[10] == 0x47 && len == 23) {
-            got = dji_neo_build_liveview(built, sizeof built, seq, test_le16(f + 13), f[17]); index = 3;
+            got = dji_neo_build_liveview_ex(built, sizeof built, seq, test_le16(f + 13), f[15], f[17]); index = 3;
         } else if (f[9] == 1 && f[10] == 0x0a && len == 41) {
             uint64_t packed = 0; uint16_t ch[4];
             for (int i = 5; i >= 0; --i) packed = (packed << 8) | f[14 + i];

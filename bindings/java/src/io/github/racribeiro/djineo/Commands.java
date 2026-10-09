@@ -13,6 +13,8 @@ public final class Commands {
     public static native int dumlReseq(byte[] frame, int sequence);
     public static native int buildHeartbeat(byte[] out, int sequence);
     public static native int buildLiveview(byte[] out, int sequence, int timerMs, boolean startEdge);
+    public static native int buildLiveviewEx(byte[] out, int sequence, int timerMs,
+            int token, boolean startEdge);
     public static native int buildStick(byte[] out, int sequence, int[] channels, long timerMs);
     public static native int buildGimbalRate(byte[] out, int sequence, int rate);
     public static native int buildGimbalEnable(byte[] out, int sequence, int stage);

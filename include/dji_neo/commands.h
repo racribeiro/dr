@@ -16,6 +16,10 @@ dji_neo_result_t dji_neo_duml_reseq(uint8_t *frame, size_t size, uint16_t sequen
 int dji_neo_build_heartbeat(uint8_t *out, size_t capacity, uint16_t sequence);
 int dji_neo_build_liveview(uint8_t *out, size_t capacity, uint16_t sequence,
                            uint16_t timer_ms, int start_edge);
+/* Explicit opaque payload byte 4; observed to change between Fly bursts.
+ * No negotiation/meaning is claimed. The legacy builder uses token 0x1a. */
+int dji_neo_build_liveview_ex(uint8_t *out, size_t capacity, uint16_t sequence,
+                              uint16_t timer_ms, uint8_t token, int start_edge);
 /* Channels: roll/pitch/throttle/yaw, center 1024, allowed 364..1684.
  * Pitch/throttle polarity is not yet validated on the drone. */
 int dji_neo_build_stick(uint8_t *out, size_t capacity, uint16_t sequence,
